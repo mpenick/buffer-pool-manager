@@ -2,7 +2,7 @@ mod buffer_pool;
 
 use std::collections::HashMap;
 use crate::buffer_pool::{FrameId, Replacer, PageId, DiskManager, Page, PageError, MAX_NUM_PAGES, BufferPoolManager};
-use crate::buffer_pool::PageError::{NotFound, OutOfStorage};
+use crate::buffer_pool::PageError::{PageNotFound, OutOfStorage};
 
 // Why are hash map keys references?
 
@@ -77,7 +77,7 @@ impl DiskManager for DiskManagerMock {
             Some(page) => {
                 Ok(page)
             }
-            None => Err(NotFound)
+            None => Err(PageNotFound)
         }
     }
 
@@ -99,20 +99,49 @@ impl DiskManager for DiskManagerMock {
     }
 }
 
+fn panic_if_error(result: Result<(), PageError>) {
+    match result {
+        Err(e) => panic!("An error occurred {}", e),
+        _ => ()
+    }
+}
+
 fn main() {
     let mut dm = DiskManagerMock::new();
     let mut r = ClockReplacer::new();
     let mut bpm = BufferPoolManager::new(&mut dm, &mut r);
 
-    let page_id: PageId;
+    let mut maybe_page_id: Option<PageId>;
     match bpm.new_page() {
         Ok(page) => {
             page.data[0] = 1;
+            maybe_page_id = Some(page.id())
+        }
+        _ => panic!("Unable to allocate new page")
+    }
+
+    match maybe_page_id {
+        Some(page_id) => {
+            panic_if_error(bpm.flush_page(page_id));
         }
         _ => ()
     }
 
-    bpm.flush_all_pages();
+    match bpm.fetch_page(1) {
+        Ok(page) => {
+            page.data[0] = 2;
+            maybe_page_id = Some(page.id())
+        }
+        _ => panic!("Unable to fetch page")
+    }
 
-    println!("Hello, world!");
+    match maybe_page_id {
+        Some(page_id) => {
+            panic_if_error(bpm.unpin_page(page_id, true));
+            panic_if_error(bpm.delete_page(page_id));
+        }
+        _ => ()
+    }
+
+    panic_if_error(bpm.flush_all_pages());
 }

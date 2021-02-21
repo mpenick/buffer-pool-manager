@@ -1,5 +1,7 @@
 use std::collections::{HashMap, VecDeque};
-use crate::buffer_pool::PageError::{ExceededPoolSize, NotFound, PageSillInUse};
+use crate::buffer_pool::PageError::{PoolExhausted, PageNotFound, PageSillInUse};
+use std::fmt::{Display, Formatter};
+use std::fmt;
 
 pub const MAX_POOL_SIZE: usize = 256;
 pub const MAX_NUM_PAGES: u32 = 256;
@@ -40,11 +42,16 @@ impl Page {
 
 #[derive(Debug)]
 pub enum PageError {
-    NotFound,
-    ExceededPoolSize,
-    OutOfMemory,
-    OutOfStorage,
+    PageNotFound,
     PageSillInUse,
+    PoolExhausted,
+    OutOfStorage,
+}
+
+impl Display for PageError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 pub trait Replacer {
@@ -160,7 +167,7 @@ impl<'a> BufferPoolManager<'a> {
                 }
                 Ok(())
             }
-            None => Err(NotFound)
+            None => Err(PageNotFound)
         }
     }
 
@@ -180,7 +187,7 @@ impl<'a> BufferPoolManager<'a> {
                 }
                 Ok(())
             }
-            _ => Err(NotFound)
+            _ => Err(PageNotFound)
         }
     }
 
@@ -209,7 +216,6 @@ impl<'a> BufferPoolManager<'a> {
                         if page.pin_count > 0 {
                             return Err(PageSillInUse);
                         }
-                        ;
                         self.replacer.pin(frame_id);
                         self.disk_manager.deallocate_page(id);
                         self.free_list.push_back(frame_id);
@@ -218,7 +224,7 @@ impl<'a> BufferPoolManager<'a> {
                 }
                 Ok(())
             }
-            _ => Err(NotFound)
+            _ => Err(PageNotFound)
         }
     }
 
@@ -231,7 +237,7 @@ impl<'a> BufferPoolManager<'a> {
         } else {
             match self.replacer.victim() {
                 Some(frame_id) => Ok((frame_id, false)),
-                None => Err(ExceededPoolSize)
+                None => Err(PoolExhausted)
             }
         }
     }
