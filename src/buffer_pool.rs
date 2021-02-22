@@ -1,4 +1,5 @@
 use crate::buffer_pool::PageError::{PageNotFound, PageSillInUse, PoolExhausted};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -108,7 +109,7 @@ impl<'a> BufferPoolManager<'a> {
                         if let Some(page) = self.pages[frame_id as usize].as_mut() {
                             Ok(page)
                         } else {
-                            panic!("Not possible!")
+                            panic!("not possible!")
                         }
                     }
                     Err(e) => Err(e),
@@ -125,7 +126,7 @@ impl<'a> BufferPoolManager<'a> {
                 self.replacer.pin(*frame_id);
                 Ok(page)
             } else {
-                panic!("Not possible!")
+                panic!("not possible!")
             }
         } else {
             match self.get_frame_id() {
@@ -157,7 +158,7 @@ impl<'a> BufferPoolManager<'a> {
                 }
                 page.is_dirty = page.is_dirty || is_dirty;
             } else {
-                panic!("Not possible!")
+                panic!("not possible!")
             }
             Ok(())
         } else {
@@ -174,7 +175,7 @@ impl<'a> BufferPoolManager<'a> {
                 }
                 page.is_dirty = false;
             } else {
-                panic!("Not possible!")
+                panic!("not possible!")
             }
             Ok(())
         } else {
@@ -205,7 +206,7 @@ impl<'a> BufferPoolManager<'a> {
                 self.disk_manager.deallocate_page(id);
                 self.free_list.push_back(frame_id);
             } else {
-                panic!("Not possible!")
+                panic!("not possible!")
             }
             Ok(())
         } else {
@@ -213,12 +214,23 @@ impl<'a> BufferPoolManager<'a> {
         }
     }
 
+    pub fn response(&self) -> Response {
+        let mut response = Response {
+            pages_in_disk: vec![],
+            max_pool_size: 0,
+            page_table: Default::default(),
+            max_disk_num_pages: 0,
+            pin_count: Default::default(),
+        };
+        response
+    }
+
     fn get_frame_id(&mut self) -> Result<(FrameId, bool), PageError> {
         if !self.free_list.is_empty() {
             if let Some(frame_id) = self.free_list.pop_front() {
                 Ok((frame_id, true))
             } else {
-                panic!("Not possible!")
+                panic!("not possible!")
             }
         } else {
             if let Some(frame_id) = self.replacer.victim() {
@@ -239,4 +251,18 @@ impl<'a> BufferPoolManager<'a> {
         }
         Ok(())
     }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct Response {
+    #[serde(rename = "PagesInDisk")]
+    pub pages_in_disk: Vec<PageId>,
+    #[serde(rename = "MaxPoolSize")]
+    pub max_pool_size: usize,
+    #[serde(rename = "PagesTable")]
+    pub page_table: HashMap<PageId, FrameId>,
+    #[serde(rename = "MaxDiskNumPages")]
+    pub max_disk_num_pages: usize,
+    #[serde(rename = "PinCount")]
+    pub pin_count: HashMap<i32, i32>,
 }

@@ -1,9 +1,11 @@
 mod buffer_pool;
+mod server;
 
 use crate::buffer_pool::PageError::{OutOfStorage, PageNotFound};
 use crate::buffer_pool::{
     BufferPoolManager, DiskManager, FrameId, Page, PageError, PageId, Replacer, MAX_NUM_PAGES,
 };
+use crate::server::serve;
 use std::collections::HashMap;
 
 // Why are hash map keys references?
@@ -108,33 +110,34 @@ fn panic_if_error(result: Result<(), PageError>) {
 fn main() {
     let mut disk_manager = DiskManagerMock::new();
     let mut replacer = ClockReplacer::new();
-    let mut manager =
-        BufferPoolManager::new(&mut disk_manager, &mut replacer);
+    let mut bpm = BufferPoolManager::new(&mut disk_manager, &mut replacer);
 
     let mut maybe_page_id: Option<PageId>;
 
-    if let Ok(page) = manager.new_page() {
+    if let Ok(page) = bpm.new_page() {
         page.data[0] = 1;
         maybe_page_id = Some(page.id())
     } else {
-        panic!("Unable to allocate new page")
+        panic!("unable to allocate new page")
     }
 
     if let Some(page_id) = maybe_page_id {
-        panic_if_error(manager.flush_page(page_id));
+        panic_if_error(bpm.flush_page(page_id));
     }
 
-    if let Ok(page) = manager.fetch_page(1) {
+    if let Ok(page) = bpm.fetch_page(1) {
         page.data[0] = 2;
         maybe_page_id = Some(page.id())
     } else {
-        panic!("Unable to fetch page")
+        panic!("unable to fetch page")
     }
 
     if let Some(page_id) = maybe_page_id {
-        panic_if_error(manager.unpin_page(page_id, true));
-        panic_if_error(manager.delete_page(page_id));
+        panic_if_error(bpm.unpin_page(page_id, true));
+        panic_if_error(bpm.delete_page(page_id));
     }
 
-    panic_if_error(manager.flush_all_pages());
+    panic_if_error(bpm.flush_all_pages());
+
+    serve(&mut bpm)
 }
