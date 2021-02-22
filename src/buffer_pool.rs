@@ -1,7 +1,7 @@
+use crate::buffer_pool::PageError::{PageNotFound, PageSillInUse, PoolExhausted};
 use std::collections::{HashMap, VecDeque};
-use crate::buffer_pool::PageError::{PoolExhausted, PageNotFound, PageSillInUse};
-use std::fmt::{Display, Formatter};
 use std::fmt;
+use std::fmt::{Display, Formatter};
 
 pub const MAX_POOL_SIZE: usize = 256;
 pub const MAX_NUM_PAGES: u32 = 256;
@@ -20,7 +20,7 @@ pub struct Page {
 
 impl Page {
     fn new(id: PageId) -> Box<Page> {
-        Box::new(Page{
+        Box::new(Page {
             id,
             pin_count: 0,
             is_dirty: false,
@@ -61,8 +61,8 @@ pub trait Replacer {
 }
 
 pub trait DiskManager {
-    fn read_page(&mut self,id: PageId) -> Result<&mut Page, PageError>;
-    fn write_page(&mut self,page: &Box<Page>) -> Result<(), PageError>;
+    fn read_page(&mut self, id: PageId) -> Result<&mut Page, PageError>;
+    fn write_page(&mut self, page: &Box<Page>) -> Result<(), PageError>;
     fn allocate_page(&mut self) -> Result<PageId, PageError>;
     fn deallocate_page(&mut self, id: PageId);
 }
@@ -76,7 +76,10 @@ pub struct BufferPoolManager<'a> {
 }
 
 impl<'a> BufferPoolManager<'a> {
-    pub fn new(disk_manager: &'a mut dyn DiskManager, replacer: &'a mut dyn Replacer) -> BufferPoolManager<'a> {
+    pub fn new(
+        disk_manager: &'a mut dyn DiskManager,
+        replacer: &'a mut dyn Replacer,
+    ) -> BufferPoolManager<'a> {
         let mut manager = BufferPoolManager {
             disk_manager,
             replacer,
@@ -94,165 +97,146 @@ impl<'a> BufferPoolManager<'a> {
         match self.get_frame_id() {
             Ok((frame_id, is_from_free_list)) => {
                 if !is_from_free_list {
-                    match self.write_if_dirty(frame_id) {
-                        Err(e) => return Err(e),
-                        _ => ()
+                    if let Err(e) = self.write_if_dirty(frame_id) {
+                        return Err(e);
                     }
                 }
-                return match self.disk_manager.allocate_page() {
+                match self.disk_manager.allocate_page() {
                     Ok(page_id) => {
                         self.page_table.insert(page_id, frame_id);
                         self.pages[frame_id as usize] = Some(Page::new(page_id));
-                        match self.pages[frame_id as usize].as_mut() {
-                            Some(page) => {
-                                Ok(page)
-                            }
-                            _ => panic!("Not possible!")
+                        if let Some(page) = self.pages[frame_id as usize].as_mut() {
+                            Ok(page)
+                        } else {
+                            panic!("Not possible!")
                         }
                     }
-                    Err(e) => Err(e)
+                    Err(e) => Err(e),
                 }
             }
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 
     pub fn fetch_page(&mut self, id: PageId) -> Result<&mut Page, PageError> {
-        match self.page_table.get(&id) {
-            Some(frame_id) => {
-                match self.pages[*frame_id as usize].as_mut() {
-                    Some(page) => {
-                        page.pin_count += 1;
-                        self.replacer.pin(*frame_id);
-                        Ok(page)
-                    }
-                    _ => panic!("Not possible!")
-                }
+        if let Some(frame_id) = self.page_table.get(&id) {
+            if let Some(page) = self.pages[*frame_id as usize].as_mut() {
+                page.pin_count += 1;
+                self.replacer.pin(*frame_id);
+                Ok(page)
+            } else {
+                panic!("Not possible!")
             }
-            None =>  {
-                match self.get_frame_id() {
-                    Ok((frame_id, is_from_free_list)) => {
-                        if !is_from_free_list {
-                            match self.write_if_dirty(frame_id) {
-                                Err(e) => return Err(e),
-                                _ => ()
-                            }
-                        }
-                        match self.disk_manager.read_page(id) {
-                            Ok(page) => {
-                                page.pin_count = 1;
-                                self.page_table.insert(id, frame_id);
-                                Ok(page)
-                            }
-                            Err(e) => Err(e)
+        } else {
+            match self.get_frame_id() {
+                Ok((frame_id, is_from_free_list)) => {
+                    if !is_from_free_list {
+                        if let Err(e) = self.write_if_dirty(frame_id) {
+                            return Err(e);
                         }
                     }
-                    Err(e) => Err(e)
+                    match self.disk_manager.read_page(id) {
+                        Ok(page) => {
+                            page.pin_count = 1;
+                            self.page_table.insert(id, frame_id);
+                            Ok(page)
+                        }
+                        Err(e) => Err(e),
+                    }
                 }
+                Err(e) => Err(e),
             }
         }
     }
 
     pub fn unpin_page(&mut self, id: PageId, is_dirty: bool) -> Result<(), PageError> {
-        match self.page_table.get(&id) {
-            Some(frame_id) => {
-                match self.pages[*frame_id as usize].as_mut() {
-                    Some(page) => {
-                        if page.dec_pin_count() {
-                            self.replacer.unpin(*frame_id);
-                        }
-                        page.is_dirty = page.is_dirty || is_dirty;
-                    }
-                    _ => panic!("Not possible!")
+        if let Some(frame_id) = self.page_table.get(&id) {
+            if let Some(page) = self.pages[*frame_id as usize].as_mut() {
+                if page.dec_pin_count() {
+                    self.replacer.unpin(*frame_id);
                 }
-                Ok(())
+                page.is_dirty = page.is_dirty || is_dirty;
+            } else {
+                panic!("Not possible!")
             }
-            None => Err(PageNotFound)
+            Ok(())
+        } else {
+            Err(PageNotFound)
         }
     }
 
     pub fn flush_page(&mut self, id: PageId) -> Result<(), PageError> {
-        match self.page_table.get(&id) {
-            Some(frame_id) => {
-                match self.pages[*frame_id as usize].as_mut() {
-                    Some(page) => {
-                        page.dec_pin_count();
-                        match self.disk_manager.write_page(page) {
-                            Err(e) => return Err(e),
-                            _ => ()
-                        }
-                        page.is_dirty = false;
-                    }
-                    _ => panic!("Not possible!")
+        if let Some(frame_id) = self.page_table.get(&id) {
+            if let Some(page) = self.pages[*frame_id as usize].as_mut() {
+                page.dec_pin_count();
+                if let Err(e) = self.disk_manager.write_page(page) {
+                    return Err(e);
                 }
-                Ok(())
+                page.is_dirty = false;
+            } else {
+                panic!("Not possible!")
             }
-            _ => Err(PageNotFound)
+            Ok(())
+        } else {
+            Err(PageNotFound)
         }
     }
 
     pub fn flush_all_pages(&mut self) -> Result<(), PageError> {
         for maybe_page in self.pages.iter_mut() {
-            match maybe_page {
-                Some(page) => {
-                    page.dec_pin_count();
-                    match self.disk_manager.write_page(page) {
-                        Err(e) => return Err(e),
-                        _ => ()
-                    }
-                    page.is_dirty = false;
+            if let Some(page) = maybe_page {
+                page.dec_pin_count();
+                if let Err(e) = self.disk_manager.write_page(page) {
+                    return Err(e);
                 }
-                _ => ()
+                page.is_dirty = false;
             }
         }
         Ok(())
     }
 
     pub fn delete_page(&mut self, id: PageId) -> Result<(), PageError> {
-        match self.page_table.remove(&id) {
-            Some(frame_id) => {
-                match self.pages[frame_id as usize].as_mut() {
-                    Some(page) => {
-                        if page.pin_count > 0 {
-                            return Err(PageSillInUse);
-                        }
-                        self.replacer.pin(frame_id);
-                        self.disk_manager.deallocate_page(id);
-                        self.free_list.push_back(frame_id);
-                    }
-                    _ => panic!("Not possible!")
+        if let Some(frame_id) = self.page_table.remove(&id) {
+            if let Some(page) = self.pages[frame_id as usize].as_mut() {
+                if page.pin_count > 0 {
+                    return Err(PageSillInUse);
                 }
-                Ok(())
+                self.replacer.pin(frame_id);
+                self.disk_manager.deallocate_page(id);
+                self.free_list.push_back(frame_id);
+            } else {
+                panic!("Not possible!")
             }
-            _ => Err(PageNotFound)
+            Ok(())
+        } else {
+            Err(PageNotFound)
         }
     }
 
-    fn get_frame_id(&mut self) -> Result<(FrameId,bool), PageError> {
+    fn get_frame_id(&mut self) -> Result<(FrameId, bool), PageError> {
         if !self.free_list.is_empty() {
-            match self.free_list.pop_front() {
-                Some(frame_id) => Ok((frame_id, true)),
-                None => panic!("Not possible!")
+            if let Some(frame_id) = self.free_list.pop_front() {
+                Ok((frame_id, true))
+            } else {
+                panic!("Not possible!")
             }
         } else {
-            match self.replacer.victim() {
-                Some(frame_id) => Ok((frame_id, false)),
-                None => Err(PoolExhausted)
+            if let Some(frame_id) = self.replacer.victim() {
+                Ok((frame_id, false))
+            } else {
+                Err(PoolExhausted)
             }
         }
     }
 
     fn write_if_dirty(&mut self, frame_id: FrameId) -> Result<(), PageError> {
-        let mut page: Option<Box<Page>> = None;
-        std::mem::swap(&mut self.pages[frame_id as usize], &mut page);
-        match page {
-            Some(page) => {
-                if page.is_dirty {
-                    return self.disk_manager.write_page(&page);
-                }
+        let mut existing_page: Option<Box<Page>> = None;
+        std::mem::swap(&mut self.pages[frame_id as usize], &mut existing_page);
+        if let Some(page) = existing_page {
+            if page.is_dirty {
+                return self.disk_manager.write_page(&page);
             }
-            _ => ()
-        };
+        }
         Ok(())
     }
 }

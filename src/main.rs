@@ -1,21 +1,23 @@
 mod buffer_pool;
 
+use crate::buffer_pool::PageError::{OutOfStorage, PageNotFound};
+use crate::buffer_pool::{
+    BufferPoolManager, DiskManager, FrameId, Page, PageError, PageId, Replacer, MAX_NUM_PAGES,
+};
 use std::collections::HashMap;
-use crate::buffer_pool::{FrameId, Replacer, PageId, DiskManager, Page, PageError, MAX_NUM_PAGES, BufferPoolManager};
-use crate::buffer_pool::PageError::{PageNotFound, OutOfStorage};
 
 // Why are hash map keys references?
 
 struct ClockReplacer {
     list: Vec<(FrameId, bool)>,
-    current: usize
+    current: usize,
 }
 
 impl ClockReplacer {
     fn new() -> ClockReplacer {
         ClockReplacer {
             list: Vec::new(),
-            current: 0
+            current: 0,
         }
     }
 
@@ -30,7 +32,7 @@ impl ClockReplacer {
 impl Replacer for ClockReplacer {
     fn victim(&mut self) -> Option<FrameId> {
         if self.list.is_empty() {
-            return None
+            return None;
         }
 
         loop {
@@ -40,7 +42,7 @@ impl Replacer for ClockReplacer {
             } else {
                 let frame_id = self.list[self.current].0;
                 self.remove(self.current);
-                return Some(frame_id)
+                return Some(frame_id);
             }
         }
     }
@@ -50,10 +52,9 @@ impl Replacer for ClockReplacer {
     }
 
     fn pin(&mut self, id: FrameId) {
-        match self.list.iter().position(|&e| e.0 == id) {
-            Some(index) => self.remove(index),
-            None => (),
-        };
+        if let Some(index) = self.list.iter().position(|&e| e.0 == id) {
+            self.remove(index);
+        }
     }
 }
 
@@ -73,11 +74,10 @@ impl DiskManagerMock {
 
 impl DiskManager for DiskManagerMock {
     fn read_page(&mut self, id: PageId) -> Result<&mut Page, PageError> {
-        match self.pages.get_mut(&id) {
-            Some(page) => {
-                Ok(page)
-            }
-            None => Err(PageNotFound)
+        if let Some(page) = self.pages.get_mut(&id) {
+            Ok(page)
+        } else {
+            Err(PageNotFound)
         }
     }
 
@@ -100,48 +100,39 @@ impl DiskManager for DiskManagerMock {
 }
 
 fn panic_if_error(result: Result<(), PageError>) {
-    match result {
-        Err(e) => panic!("An error occurred {}", e),
-        _ => ()
+    if let Err(e) = result {
+        panic!("An error occurred {}", e)
     }
 }
 
 fn main() {
-    let mut dm = DiskManagerMock::new();
-    let mut r = ClockReplacer::new();
-    let mut bpm = BufferPoolManager::new(&mut dm, &mut r);
+    let mut manager =
+        BufferPoolManager::new(&mut DiskManagerMock::new(), &mut ClockReplacer::new());
 
     let mut maybe_page_id: Option<PageId>;
-    match bpm.new_page() {
-        Ok(page) => {
-            page.data[0] = 1;
-            maybe_page_id = Some(page.id())
-        }
-        _ => panic!("Unable to allocate new page")
+
+    if let Ok(page) = manager.new_page() {
+        page.data[0] = 1;
+        maybe_page_id = Some(page.id())
+    } else {
+        panic!("Unable to allocate new page")
     }
 
-    match maybe_page_id {
-        Some(page_id) => {
-            panic_if_error(bpm.flush_page(page_id));
-        }
-        _ => ()
+    if let Some(page_id) = maybe_page_id {
+        panic_if_error(manager.flush_page(page_id));
     }
 
-    match bpm.fetch_page(1) {
-        Ok(page) => {
-            page.data[0] = 2;
-            maybe_page_id = Some(page.id())
-        }
-        _ => panic!("Unable to fetch page")
+    if let Ok(page) = manager.fetch_page(1) {
+        page.data[0] = 2;
+        maybe_page_id = Some(page.id())
+    } else {
+        panic!("Unable to fetch page")
     }
 
-    match maybe_page_id {
-        Some(page_id) => {
-            panic_if_error(bpm.unpin_page(page_id, true));
-            panic_if_error(bpm.delete_page(page_id));
-        }
-        _ => ()
+    if let Some(page_id) = maybe_page_id {
+        panic_if_error(manager.unpin_page(page_id, true));
+        panic_if_error(manager.delete_page(page_id));
     }
 
-    panic_if_error(bpm.flush_all_pages());
+    panic_if_error(manager.flush_all_pages());
 }
