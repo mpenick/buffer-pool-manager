@@ -106,8 +106,10 @@ fn panic_if_error(result: Result<(), PageError>) {
 }
 
 fn main() {
+    let mut disk_manager = DiskManagerMock::new();
+    let mut replacer = ClockReplacer::new();
     let mut manager =
-        BufferPoolManager::new(&mut DiskManagerMock::new(), &mut ClockReplacer::new());
+        BufferPoolManager::new(&mut disk_manager, &mut replacer);
 
     let mut maybe_page_id: Option<PageId>;
 
