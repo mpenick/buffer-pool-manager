@@ -1,0 +1,3 @@
+[submodule "buffer-pool-manager"]
+	path = buffer-pool-manager
+	url = https://github.com/brunocalza/buffer-pool-manager.git
